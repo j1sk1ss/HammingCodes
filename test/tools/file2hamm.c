@@ -36,7 +36,8 @@ int main(int argc, char* argv[]) {
 
     fread(buffer, 1, in_size, src_f);
     fclose(src_f);
-
+    
+    ll_init();
     long enc_size = calculate_encoded_size((int)in_size, _m);
     char* encoded = (char*)malloc(enc_size);
     if (!encoded) {

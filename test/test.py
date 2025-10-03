@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import random
 import argparse
 import pyfiglet
 import textwrap
@@ -15,6 +16,28 @@ def _clean_tools(coder: str, decoder: str, generator: str) -> None:
             print(f"[CLEANUP] remove old {tool}")
             os.remove(tool)
 
+def _compare_files(ffile: str, sfile: str) -> bool:
+    chunk_size = 8192
+    with open(ffile, "rb") as f1, open(sfile, "rb") as f2:
+        while True:
+            b1 = f1.read(chunk_size)
+            b2 = f2.read(chunk_size)
+            if b1 != b2:
+                return False 
+            if not b1:
+                break
+    return True
+
+def _fill_file(path: str, size: int) -> list[int]:
+    content: list[int] = []
+    with open(path, "wb") as f:
+        for _ in range(size):
+            byte = random.randint(0, 255)
+            f.write(byte.to_bytes(1, "little"))
+            content.append(byte)
+            
+    return content
+
 def _launch_tool(tool: str, args: list[str]) -> None:
     """Launch provided builded tool
 
@@ -22,6 +45,7 @@ def _launch_tool(tool: str, args: list[str]) -> None:
         tool (str): Tool path
         args (list[str]): Passed arguments
     """
+    print(f"[LAUNCH] tool={tool}, args={args}")
     subprocess.run([tool, *args], check=True)
 
 def _build_tools(gcc: str, basedir: str, coder: str, decoder: str, generator: str) -> None:
@@ -91,7 +115,6 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=1)
     parser.add_argument("--intensity", type=float, default=.7)
     parser.add_argument("--size", type=int, default=10)
-    parser.add_argument("--image", type=str, default="image.img")
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
@@ -101,12 +124,24 @@ if __name__ == "__main__":
         _print_parity_info()
         exit(1)
 
-    _build_tools(args.gcc, args.hamm_api, args.coder, args.decoder, args.file_gen)
-    _launch_tool(args.file_gen, ["--fs", args.file_size, "--out", args.src_file])
-    _clean_tools(args.coder, args.decoder, args.file_gen)
+    _build_tools(gcc=args.gcc, basedir=args.hamm_api, coder=args.coder, decoder=args.decoder, generator=args.file_gen)
+    
+    _launch_tool(tool=args.file_gen, args=["--fs", args.file_size, "--out", args.src_file])
+    
+    print(f"[FILE] filling file {args.src_file} with random data...")
+    _fill_file(path=args.src_file, size=int(args.file_size))
+    
+    _launch_tool(tool=args.coder, args=["--pb", args.parity_bits, "--target", args.src_file, "--out", args.coded_file])
 
     if args.strategy == "random":
-        random_bitflips(file_path=args.image, num_flips=args.size)
+        random_bitflips(file_path=args.coded_file, num_flips=args.size)
     elif args.strategy == "scratch":
-        scratch_emulation(file_path=args.image, scratch_length=args.scratch_length, width=args.width, intensity=args.intensity)
-        
+        scratch_emulation(file_path=args.coded_file, scratch_length=args.scratch_length, width=args.width, intensity=args.intensity)
+    
+    _launch_tool(tool=args.decoder, args=["--pb", args.parity_bits, "--target", args.coded_file, "--out", args.decoded_file])
+    if not _compare_files(ffile=args.src_file, sfile=args.decoded_file):
+        print("[ERROR] Source file not equals to Decoded file!")
+    else:
+        print("[INFO] Source file == Decoded file!")
+    
+    _clean_tools(coder=args.coder, decoder=args.decoder, generator=args.file_gen)    

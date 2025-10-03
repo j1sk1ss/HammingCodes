@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 
+#include <mm.h>
 #include <str.h>
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
