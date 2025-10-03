@@ -1,3 +1,4 @@
+import os
 import sys
 import mmap
 import random
@@ -16,6 +17,21 @@ def random_bitflips(file_path: str, num_flips: int = 10) -> None:
 
         mm.flush()
         mm.close()
+
+def white_noise_bitflips(file_path: str, flip_probability: float = 0.01) -> None:
+    with open(file_path, "r+b") as f:
+        with mmap.mmap(f.fileno(), 0) as mm:
+            size: int = len(mm)
+            for byte_idx in range(size):
+                original_byte = mm[byte_idx]
+                modified_byte = original_byte
+                
+                for bit_pos in range(8):
+                    if random.random() < flip_probability:
+                        modified_byte ^= (1 << bit_pos)
+                
+                if modified_byte != original_byte:
+                    mm[byte_idx] = modified_byte
 
 def scratch_emulation(
     file_path: str,

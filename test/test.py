@@ -8,7 +8,11 @@ import pyfiglet
 import textwrap
 import subprocess
 
-from tools.injector import random_bitflips, scratch_emulation
+from tools.injector import (
+    random_bitflips, 
+    white_noise_bitflips,
+    scratch_emulation
+)
 
 def _clean_tools(coder: str, decoder: str, generator: str) -> None:
     tools: list[str] = [coder, decoder, generator]
@@ -139,8 +143,9 @@ if __name__ == "__main__":
     parser.add_argument("--decoded-file", type=str, default="decoded.img", help="Decoded encoded source file name")
     
     # === Bitflips emulation ===
-    parser.add_argument("--strategy", type=str, default="none", help="random or scratch")
+    parser.add_argument("--strategy", type=str, default="none", help="random, scratch or wnoise")
     parser.add_argument("--scratch-length", type=int, default=1024)
+    parser.add_argument("--flip-prob", type=float, default=.5)
     parser.add_argument("--width", type=int, default=1)
     parser.add_argument("--intensity", type=float, default=.7)
     parser.add_argument("--flips-size", type=int, default=10)
@@ -168,6 +173,8 @@ if __name__ == "__main__":
 
         if args.strategy == "random":
             random_bitflips(file_path=args.coded_file, num_flips=args.flips_size)
+        elif args.strategy == "wnoise":
+            white_noise_bitflips(file_path=args.coded_file, flip_probability=args.flip_prob)
         elif args.strategy == "scratch":
             scratch_emulation(file_path=args.coded_file, scratch_length=args.scratch_length, width=args.width, intensity=args.intensity)
         
