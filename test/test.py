@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import time
 import random
 import argparse
 import pyfiglet
@@ -16,17 +17,26 @@ def _clean_tools(coder: str, decoder: str, generator: str) -> None:
             print(f"[CLEANUP] remove old {tool}")
             os.remove(tool)
 
-def _compare_files(ffile: str, sfile: str) -> bool:
+def _bit_differences(ffile: str, sfile: str) -> int:
     chunk_size = 8192
+    diff_bits = 0
+
     with open(ffile, "rb") as f1, open(sfile, "rb") as f2:
         while True:
             b1 = f1.read(chunk_size)
             b2 = f2.read(chunk_size)
-            if b1 != b2:
-                return False 
-            if not b1:
+            if not b1 and not b2:
                 break
-    return True
+
+            if len(b1) < len(b2):
+                b1 += b'\x00' * (len(b2) - len(b1))
+            elif len(b2) < len(b1):
+                b2 += b'\x00' * (len(b1) - len(b2))
+
+            for byte1, byte2 in zip(b1, b2):
+                diff_bits += bin(byte1 ^ byte2).count('1')
+
+    return diff_bits
 
 def _fill_file(path: str, size: int) -> list[int]:
     content: list[int] = []
@@ -38,7 +48,7 @@ def _fill_file(path: str, size: int) -> list[int]:
             
     return content
 
-def _launch_tool(tool: str, args: list[str]) -> None:
+def _launch_tool(tool: str, args: list[str]) -> float:
     """Launch provided builded tool
 
     Args:
@@ -46,7 +56,11 @@ def _launch_tool(tool: str, args: list[str]) -> None:
         args (list[str]): Passed arguments
     """
     print(f"[LAUNCH] tool={tool}, args={args}")
+    start_time = time.perf_counter()
     subprocess.run([tool, *args], check=True)
+    end_time = time.perf_counter()
+    elapsed = end_time - start_time
+    return elapsed
 
 def _build_tools(gcc: str, basedir: str, coder: str, decoder: str, generator: str) -> None:
     """Build tools with provided GCC
@@ -68,6 +82,20 @@ def _build_tools(gcc: str, basedir: str, coder: str, decoder: str, generator: st
         print(f"[BUILD] {c_file} -> {tool}")
         c_files = glob.glob(f"{basedir}/src/*.c")
         subprocess.run([gcc, f"-I{basedir}/include", "-O2", "-Wall", "-o", tool, *c_files, c_file], check=True)
+
+def _print_statistics(size: int, diff: int, dectime: float, enctime: float) -> None:
+    total_bits = size * 8
+    percent_error = (diff / total_bits) * 100 if total_bits > 0 else 0
+    print("=" * 50)
+    print(f"{'Statistic':<25} | {'Value'}")
+    print("-" * 50)
+    print(f"{'Original file size (b)':<25} | {size}")
+    print(f"{'Total bits':<25} | {total_bits}")
+    print(f"{'Bit differences':<25} | {diff}")
+    print(f"{'Percentage errors':<25} | {percent_error:.6f}%")
+    print(f"{'Encoding time (s)':<25} | {enctime:.6f}")
+    print(f"{'Decoding time (s)':<25} | {dectime:.6f}")
+    print("=" * 50)
 
 def _print_parity_info() -> None:
     print("parity_bits=2 => Hamming 3,1")
@@ -100,6 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--coder", type=str, default="tools/file2hamm", help="Coder .c file")
     parser.add_argument("--decoder", type=str, default="tools/hamm2file", help="Decoder .c file")
     parser.add_argument("--file-gen", type=str, default="tools/gen_file", help="Generator .c file")
+    parser.add_argument("--repeat", type=int, default=1, help="Repeat count")
     
     # === Coder and Decoder setup ===
     parser.add_argument("--file-size", type=str, default="512", help="Source file (with data) size")
@@ -114,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--scratch-length", type=int, default=1024)
     parser.add_argument("--width", type=int, default=1)
     parser.add_argument("--intensity", type=float, default=.7)
-    parser.add_argument("--size", type=int, default=10)
+    parser.add_argument("--flips-size", type=int, default=10)
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
@@ -126,22 +155,24 @@ if __name__ == "__main__":
 
     _build_tools(gcc=args.gcc, basedir=args.hamm_api, coder=args.coder, decoder=args.decoder, generator=args.file_gen)
     
-    _launch_tool(tool=args.file_gen, args=["--fs", args.file_size, "--out", args.src_file])
-    
-    print(f"[FILE] filling file {args.src_file} with random data...")
-    _fill_file(path=args.src_file, size=int(args.file_size))
-    
-    _launch_tool(tool=args.coder, args=["--pb", args.parity_bits, "--target", args.src_file, "--out", args.coded_file])
+    diff: int = 0
+    enctime: float = .0
+    dectime: float = .0
+    for _ in range(args.repeat):
+        _launch_tool(tool=args.file_gen, args=["--fs", args.file_size, "--out", args.src_file])
+        
+        print(f"[FILE] filling file {args.src_file} with random data...")
+        _fill_file(path=args.src_file, size=int(args.file_size))
+        
+        enctime += _launch_tool(tool=args.coder, args=["--pb", args.parity_bits, "--target", args.src_file, "--out", args.coded_file])
 
-    if args.strategy == "random":
-        random_bitflips(file_path=args.coded_file, num_flips=args.size)
-    elif args.strategy == "scratch":
-        scratch_emulation(file_path=args.coded_file, scratch_length=args.scratch_length, width=args.width, intensity=args.intensity)
+        if args.strategy == "random":
+            random_bitflips(file_path=args.coded_file, num_flips=args.flips_size)
+        elif args.strategy == "scratch":
+            scratch_emulation(file_path=args.coded_file, scratch_length=args.scratch_length, width=args.width, intensity=args.intensity)
+        
+        dectime += _launch_tool(tool=args.decoder, args=["--pb", args.parity_bits, "--target", args.coded_file, "--out", args.decoded_file])
+        diff += _bit_differences(ffile=args.src_file, sfile=args.decoded_file)
     
-    _launch_tool(tool=args.decoder, args=["--pb", args.parity_bits, "--target", args.coded_file, "--out", args.decoded_file])
-    if not _compare_files(ffile=args.src_file, sfile=args.decoded_file):
-        print("[ERROR] Source file not equals to Decoded file!")
-    else:
-        print("[INFO] Source file == Decoded file!")
-    
-    _clean_tools(coder=args.coder, decoder=args.decoder, generator=args.file_gen)    
+    _print_statistics(size=int(args.file_size), diff=diff / args.repeat, enctime=enctime / args.repeat, dectime=dectime / args.repeat)
+    _clean_tools(coder=args.coder, decoder=args.decoder, generator=args.file_gen)
