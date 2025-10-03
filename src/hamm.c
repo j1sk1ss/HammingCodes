@@ -2,8 +2,6 @@
 
 int encode_hamming(void* src, void* out, long m) {
     long n = (1 << m) - 1;
-    long k = n - m;
-
     str_memset(out, 0, (n + 7) / 8);
 
     long data_bit = 0;
@@ -32,18 +30,16 @@ int encode_hamming(void* src, void* out, long m) {
 
 int decode_hamming(void* src, void* out, long m) {
     long n = (1 << m) - 1;
-    long k = n - m;
-
     byte_t encoded[(n + 7) / 8];
     str_memset(encoded, 0, (n + 7) / 8);
 
     long error_pos = 0;
     for (long p = 0; p < m; p++) {
-        long parity_pos = (1 << p) - 1;
         byte_t parity = 0;
         for (long i = 0; i < n; i++) {
-            if ((i + 1) & (1 << p))
+            if ((i + 1) & (1 << p)) {
                 parity ^= get_bit_buff(encoded, i);
+            }
         }
 
         if (parity) error_pos += (1 << p);

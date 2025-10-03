@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
     FILE* f = fopen(_out_path, "wb");
     if (!f) return EXIT_FAILURE;
 
-    if (fwrite(body, _def_size, 1, f) != _def_size) {
+    if (fwrite(body, 1, _def_size, f) != _def_size) {
         printf("Write error!\n");
     }
 

@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    decode_hamming_array(buffer, in_size, decoded, _m);
+    decode_hamming_array((const byte_t*)buffer, in_size, (byte_t*)decoded, _m);
 
     FILE *fo = fopen(_out_path, "wb");
     fwrite(decoded, 1, enc_size, fo);
