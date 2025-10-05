@@ -40,10 +40,8 @@ Return encoded buffer size.
 static inline long calculate_encoded_size(long dsize, int m) {
     long n = (1 << m) - 1;
     long k = n - m;
-    long data_bits = dsize * 8;
-    long blocks = (data_bits + k - 1) / k;
-    long encoded_bits = blocks * n;
-    return (encoded_bits + 7) / 8;
+    long blocks = (dsize * 8 + k - 1) / k;
+    return (blocks * n + 7) / 8;
 }
 
 /*
@@ -58,10 +56,8 @@ Return decoded buffer size.
 static inline long calculate_decoded_size(long esize, int m) {
     long n = (1 << m) - 1;
     long k = n - m;
-    long encoded_bits = esize * 8;
-    long blocks = encoded_bits / n;
-    long data_bits = blocks * k;
-    return data_bits / 8;
+    long blocks = (esize * 8 + n - 1) / n;
+    return (blocks * k + 7) / 8;
 }
 
 /*

@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
     fclose(src_f);
 
     ll_init();
-    long dec_size = calculate_decoded_size((int)in_size, _m);
+    long dec_size = calculate_decoded_size(in_size, _m);
     char* decoded = (char*)malloc(dec_size);
     if (!decoded) {
         free(buffer);
