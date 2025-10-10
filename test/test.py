@@ -8,29 +8,38 @@ import pyfiglet
 import textwrap
 import subprocess
 
-from tools.injector import (
-    random_bitflips, 
-    white_noise_bitflips,
-    scratch_emulation
-)
+from tools.injector import random_bitflips, white_noise_bitflips, scratch_emulation
 
-def _get_cpu_ticks() -> int:
+CPU_VOLTAGE = 1.2
+CPU_CAPACITANCE = 1e-9
+
+def get_cpu_ticks() -> int:
     with open("/proc/stat", "r") as f:
         line = f.readline()
     parts = line.split()[1:]
     return sum(map(int, parts))
 
-def _get_cpu_temp() -> float:
+def get_cpu_temp() -> float:
     try:
         with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
             return int(f.read()) / 1000.0
     except FileNotFoundError:
         return -1.0
 
+def get_cpu_freq() -> float:
+    try:
+        with open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") as f:
+            return int(f.read().strip()) / 1e6
+    except FileNotFoundError:
+        return -1.0
+
+def estimate_energy(cpu_time: float, freq_ghz: float) -> float:
+    freq_hz = freq_ghz * 1e9
+    return CPU_CAPACITANCE * (CPU_VOLTAGE ** 2) * freq_hz * cpu_time
+
 def _clean_tools(coder: str, decoder: str, generator: str) -> None:
     for tool in [coder, decoder, generator]:
         if os.path.exists(tool):
-            print(f"[CLEANUP] remove old {tool}")
             os.remove(tool)
 
 def _bit_differences(ffile: str, sfile: str) -> int:
@@ -51,7 +60,7 @@ def _bit_differences(ffile: str, sfile: str) -> int:
     return diff_bits
 
 def _fill_file(path: str, size: int) -> list[int]:
-    content: list[int] = []
+    content = []
     with open(path, "wb") as f:
         for _ in range(size):
             byte = random.randint(0, 255)
@@ -59,57 +68,57 @@ def _fill_file(path: str, size: int) -> list[int]:
             content.append(byte)
     return content
 
-def _launch_tool(tool: str, args: list[str]) -> tuple[float, float, int, float]:
-    print(f"[LAUNCH] tool={tool}, args={args}")
-    
+def _launch_tool(tool: str, args: list[str]) -> tuple[float, float, int, float, float]:
     start_time = time.perf_counter()
     start_proc_time = time.process_time()
-    start_ticks = _get_cpu_ticks()
-    start_temp = _get_cpu_temp()
+    start_ticks = get_cpu_ticks()
+    start_temp = get_cpu_temp()
     
     subprocess.run([tool, *args], check=True)
     
     end_time = time.perf_counter()
     end_proc_time = time.process_time()
-    end_ticks = _get_cpu_ticks()
-    end_temp = _get_cpu_temp()
-
+    end_ticks = get_cpu_ticks()
+    end_temp = get_cpu_temp()
+    freq_ghz = get_cpu_freq()
+    
     elapsed = end_time - start_time
     cpu_time = end_proc_time - start_proc_time
     tick_diff = end_ticks - start_ticks
     temp_diff = end_temp - start_temp
-
-    return elapsed, cpu_time, tick_diff, temp_diff
+    energy = estimate_energy(cpu_time, freq_ghz)
+    
+    return elapsed, cpu_time, tick_diff, temp_diff, energy
 
 def _build_tools(gcc: str, basedir: str, coder: str, decoder: str, generator: str) -> None:
     for tool in [coder, decoder, generator]:
         c_file = f"{tool}.c"
         if os.path.exists(tool):
-            print(f"[CLEANUP] remove old {tool}")
             os.remove(tool)
-        print(f"[BUILD] {c_file} -> {tool}")
         c_files = glob.glob(f"{basedir}/src/*.c")
         subprocess.run([gcc, f"-I{basedir}/include", "-O2", "-Wall", "-o", tool, *c_files, c_file], check=True)
 
-def _print_statistics(size: int, diff: int, dectime: float, enctime: float, cpu_enc: float, cpu_dec: float, ticks_enc: int, ticks_dec: int, temp_enc: float, temp_dec: float) -> None:
+def _print_statistics(size: int, diff: int, enctime: float, dectime: float, cpu_enc: float, cpu_dec: float, ticks_enc: int, ticks_dec: int, temp_enc: float, temp_dec: float, energy_enc: float, energy_dec: float) -> None:
     total_bits = size * 8
     percent_error = (diff / total_bits) * 100 if total_bits > 0 else 0
-    print("=" * 60)
-    print(f"{'Statistic':<30} | {'Value'}")
-    print("-" * 60)
-    print(f"{'Original file size (bytes)':<30} | {size}")
-    print(f"{'Total bits':<30} | {total_bits}")
-    print(f"{'Bit differences':<30} | {diff}")
-    print(f"{'Percentage errors':<30} | {percent_error:.6f}%")
-    print(f"{'Encoding time (s)':<30} | {enctime:.6f}")
-    print(f"{'Decoding time (s)':<30} | {dectime:.6f}")
-    print(f"{'Encoding CPU time (s)':<30} | {cpu_enc:.6f}")
-    print(f"{'Decoding CPU time (s)':<30} | {cpu_dec:.6f}")
-    print(f"{'Encoding CPU ticks':<30} | {ticks_enc}")
-    print(f"{'Decoding CPU ticks':<30} | {ticks_dec}")
-    print(f"{'Temp Δ Encoding (°C)':<30} | {temp_enc:+.2f}")
-    print(f"{'Temp Δ Decoding (°C)':<30} | {temp_dec:+.2f}")
-    print("=" * 60)
+    print("=" * 80)
+    print(f"{'Statistic':<40} | {'Value'}")
+    print("-" * 80)
+    print(f"{'Original file size (bytes)':<40} | {size}")
+    print(f"{'Total bits':<40} | {total_bits}")
+    print(f"{'Bit differences':<40} | {diff}")
+    print(f"{'Percentage errors':<40} | {percent_error:.6f}%")
+    print(f"{'Encoding time (s)':<40} | {enctime:.6f}")
+    print(f"{'Decoding time (s)':<40} | {dectime:.6f}")
+    print(f"{'Encoding CPU time (s)':<40} | {cpu_enc:.6f}")
+    print(f"{'Decoding CPU time (s)':<40} | {cpu_dec:.6f}")
+    print(f"{'Encoding CPU ticks':<40} | {ticks_enc}")
+    print(f"{'Decoding CPU ticks':<40} | {ticks_dec}")
+    print(f"{'Temp Δ Encoding (°C)':<40} | {temp_enc:+.2f}")
+    print(f"{'Temp Δ Decoding (°C)':<40} | {temp_dec:+.2f}")
+    print(f"{'Estimated CPU energy Encoding (J)':<40} | {energy_enc:.6f}")
+    print(f"{'Estimated CPU energy Decoding (J)':<40} | {energy_dec:.6f}")
+    print("=" * 80)
 
 def _print_parity_info() -> None:
     print("parity_bits=2 => Hamming 3,1")
@@ -163,20 +172,20 @@ if __name__ == "__main__":
 
     _build_tools(args.gcc, args.hamm_api, args.coder, args.decoder, args.file_gen)
 
-    diff = enctime = dectime = cpu_enc = cpu_dec = 0.0
+    diff = enctime = dectime = cpu_enc = cpu_dec = energy_enc = energy_dec = 0.0
     ticks_enc = ticks_dec = 0
     temp_enc = temp_dec = 0.0
 
     for _ in range(args.repeat):
         _launch_tool(args.file_gen, ["--fs", args.file_size, "--out", args.src_file])
-        print(f"[FILE] filling file {args.src_file} with random data...")
         _fill_file(args.src_file, int(args.file_size))
         
-        enc_elapsed, enc_cpu, enc_ticks, enc_temp = _launch_tool(args.coder, ["--pb", args.parity_bits, "--target", args.src_file, "--out", args.coded_file])
+        enc_elapsed, enc_cpu, enc_ticks, enc_temp, enc_energy = _launch_tool(args.coder, ["--pb", args.parity_bits, "--target", args.src_file, "--out", args.coded_file])
         enctime += enc_elapsed
         cpu_enc += enc_cpu
         ticks_enc += enc_ticks
         temp_enc += enc_temp
+        energy_enc += enc_energy
 
         if args.strategy == "random":
             random_bitflips(args.coded_file, args.flips_size)
@@ -185,24 +194,29 @@ if __name__ == "__main__":
         elif args.strategy == "scratch":
             scratch_emulation(args.coded_file, args.scratch_length, args.width, args.intensity)
         
-        dec_elapsed, dec_cpu, dec_ticks, dec_temp = _launch_tool(args.decoder, ["--pb", args.parity_bits, "--target", args.coded_file, "--out", args.decoded_file])
+        dec_elapsed, dec_cpu, dec_ticks, dec_temp, dec_energy = _launch_tool(args.decoder, ["--pb", args.parity_bits, "--target", args.coded_file, "--out", args.decoded_file])
         dectime += dec_elapsed
         cpu_dec += dec_cpu
         ticks_dec += dec_ticks
         temp_dec += dec_temp
+        energy_dec += dec_energy
+
         diff += _bit_differences(args.src_file, args.decoded_file)
-    
+
+    repeats = args.repeat
     _print_statistics(
         size=int(args.file_size),
-        diff=diff / args.repeat,
-        enctime=enctime / args.repeat,
-        dectime=dectime / args.repeat,
-        cpu_enc=cpu_enc / args.repeat,
-        cpu_dec=cpu_dec / args.repeat,
-        ticks_enc=ticks_enc // args.repeat,
-        ticks_dec=ticks_dec // args.repeat,
-        temp_enc=temp_enc / args.repeat,
-        temp_dec=temp_dec / args.repeat
+        diff=diff / repeats,
+        enctime=enctime / repeats,
+        dectime=dectime / repeats,
+        cpu_enc=cpu_enc / repeats,
+        cpu_dec=cpu_dec / repeats,
+        ticks_enc=ticks_enc // repeats,
+        ticks_dec=ticks_dec // repeats,
+        temp_enc=temp_enc / repeats,
+        temp_dec=temp_dec / repeats,
+        energy_enc=energy_enc / repeats,
+        energy_dec=energy_dec / repeats
     )
-    
+
     _clean_tools(args.coder, args.decoder, args.file_gen)
