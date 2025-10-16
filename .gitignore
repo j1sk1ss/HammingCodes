@@ -1,5 +1,6 @@
 .vscode
 *.img
-*.hamm
+*.enc
+*.dec
 __pycache__
 .DS_Store
